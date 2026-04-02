@@ -1,6 +1,6 @@
 export async function askAssistant(prompt: string, context: Record<string, unknown>) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const apiKey = process.env.HUGGINGFACE_API_KEY;
+  const model = process.env.HUGGINGFACE_MODEL || "meta-llama/Meta-Llama-3-8B-Instruct";
 
   if (!apiKey) {
     return `Assistant is not configured yet. Here is a safe fallback response.\n\nQuestion: ${prompt}\n\nBased on the available student context, focus first on topics with low quiz accuracy, low completion ratio, and high exam importance.`;
@@ -10,7 +10,7 @@ export async function askAssistant(prompt: string, context: Record<string, unkno
 Help with study planning, topic prioritization, time management, and exam preparation.
 Use the provided student context. Be specific, structured, and concise.`;
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetch("https://router.huggingface.co/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -55,5 +55,5 @@ uvicorn main:app --reload --port 8000
 ## Notes
 
 - The Next.js app calls the FastAPI service via `ML_SERVICE_URL`.
-- The AI assistant route currently uses an OpenAI-compatible chat completions endpoint.
+- The AI assistant route currently uses a Hugging Face-compatible chat completions endpoint.
 - For production, move authentication and file upload to signed uploads / object storage.
