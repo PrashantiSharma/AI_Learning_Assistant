@@ -7,10 +7,29 @@
 }
 
 body {
-  @apply bg-slate-50 text-slate-900;
+  @apply bg-slate-50 text-slate-900 antialiased;
 }
 
 pre {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+* {
+  @apply border-slate-200;
+}
+
+input,
+button,
+select,
+textarea {
+  @apply outline-none;
+}
+
+input:focus-visible,
+button:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  @apply ring-2 ring-indigo-500 ring-offset-2 ring-offset-white;
 }
