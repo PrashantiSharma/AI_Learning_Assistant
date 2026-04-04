@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Filter, RefreshCcw, Sparkles } from "lucide-react";
 import { SectionHeader } from "@/components/ui/section-header";
 
@@ -14,14 +14,21 @@ type PlanItem = {
   day: string;
 };
 
+type SeedInfo = {
+  studentId: string;
+  subjectId: string;
+};
+
 function normalizePlan(data: any): PlanItem[] {
   if (!data) return [];
 
   const candidateArray =
+    (Array.isArray(data?.study_plan) && data.study_plan) ||
     (Array.isArray(data?.daily_plan) && data.daily_plan) ||
     (Array.isArray(data?.plan) && data.plan) ||
     (Array.isArray(data?.topics) && data.topics) ||
     (Array.isArray(data?.ranked_topics) && data.ranked_topics) ||
+    (Array.isArray(data?.predictions) && data.predictions) ||
     (Array.isArray(data) && data) ||
     [];
 
@@ -30,9 +37,19 @@ function normalizePlan(data: any): PlanItem[] {
     title: item.topic_name ?? item.topic ?? item.name ?? `Topic ${index + 1}`,
     subject: item.subject ?? item.subject_name ?? "General",
     priority:
-      String(item.priority ?? item.predicted_priority ?? "medium").toLowerCase() === "high"
+      String(
+        item.priority ??
+          item.predicted_priority_class ??
+          item.predicted_priority ??
+          "medium"
+      ).toLowerCase() === "high"
         ? "high"
-        : String(item.priority ?? item.predicted_priority ?? "medium").toLowerCase() === "low"
+        : String(
+              item.priority ??
+                item.predicted_priority_class ??
+                item.predicted_priority ??
+                "medium"
+            ).toLowerCase() === "low"
           ? "low"
           : "medium",
     difficulty: Number(item.topic_difficulty ?? item.difficulty ?? 3),
@@ -51,6 +68,8 @@ export default function StudyPlanPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [seedInfo, setSeedInfo] = useState<SeedInfo | null>(null);
+  const [updatingItemId, setUpdatingItemId] = useState<string | null>(null);
   const [subjectFilter, setSubjectFilter] = useState("all");
   const [dayFilter, setDayFilter] = useState("all");
 
@@ -68,35 +87,143 @@ export default function StudyPlanPage() {
       (dayFilter === "all" || item.day === dayFilter),
   );
 
+  async function ensureSeedInfo() {
+    if (seedInfo) return seedInfo;
+
+    const studentRes = await fetch("/api/seed-info");
+    const data = await studentRes.json();
+
+    if (!studentRes.ok) {
+      throw new Error(data.error ?? "Failed to load student context");
+    }
+
+    const info = {
+      studentId: String(data.studentId),
+      subjectId: String(data.subjectId),
+    };
+
+    setSeedInfo(info);
+    return info;
+  }
+
+  async function loadLatestPlan() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const info = await ensureSeedInfo();
+      const params = new URLSearchParams({
+        studentId: info.studentId,
+        subjectId: info.subjectId,
+        autoGenerate: "true",
+      });
+
+      const res = await fetch(`/api/study-plan?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to load study plan");
+      }
+
+      setResult(data);
+      setSubjectFilter("all");
+      setDayFilter("all");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load study plan");
+      setResult(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadLatestPlan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handleGenerate() {
     setLoading(true);
     setError(null);
 
     try {
-      const studentRes = await fetch("/api/seed-info");
-      const seedInfo = await studentRes.json();
-
-      if (!studentRes.ok) {
-        throw new Error(seedInfo.error ?? "Failed to load seed info");
-      }
+      const info = await ensureSeedInfo();
 
       const res = await fetch("/api/study-plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          studentId: seedInfo.studentId,
-          subjectId: seedInfo.subjectId,
+          studentId: info.studentId,
+          subjectId: info.subjectId,
         }),
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to generate plan");
       setResult(data);
+      setSubjectFilter("all");
+      setDayFilter("all");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate study plan");
       setResult(null);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleToggleComplete(item: PlanItem) {
+    const nextCompleted = !item.completed;
+
+    setUpdatingItemId(item.id);
+    setError(null);
+
+    setResult((prev: any) => {
+      if (!prev || !Array.isArray(prev.study_plan)) return prev;
+      return {
+        ...prev,
+        study_plan: prev.study_plan.map((row: any) =>
+          String(row.id ?? "") === item.id ? { ...row, completed: nextCompleted } : row,
+        ),
+      };
+    });
+
+    try {
+      const info = await ensureSeedInfo();
+      const res = await fetch("/api/study-plan", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: info.studentId,
+          itemId: item.id,
+          completed: nextCompleted,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to update task status");
+      }
+
+      if (Array.isArray(data.study_plan)) {
+        setResult((prev: any) => ({
+          ...(prev && typeof prev === "object" ? prev : {}),
+          study_plan: data.study_plan,
+        }));
+      }
+    } catch (err) {
+      setResult((prev: any) => {
+        if (!prev || !Array.isArray(prev.study_plan)) return prev;
+        return {
+          ...prev,
+          study_plan: prev.study_plan.map((row: any) =>
+            String(row.id ?? "") === item.id ? { ...row, completed: !nextCompleted } : row,
+          ),
+        };
+      });
+      setError(err instanceof Error ? err.message : "Failed to update task status");
+    } finally {
+      setUpdatingItemId(null);
     }
   }
 
@@ -196,15 +323,29 @@ export default function StudyPlanPage() {
                     </td>
                     <td className="px-4 py-4 text-slate-700">{item.difficulty}/5</td>
                     <td className="px-4 py-4">
-                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs ${
+                          item.completed
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-slate-100 text-slate-700"
+                        }`}
+                      >
                         <CheckCircle2 className="h-3.5 w-3.5" />
                         {item.completed ? "Completed" : "In progress"}
                       </span>
                     </td>
                     <td className="px-4 py-4">
-                      <button className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100">
+                      <button
+                        onClick={() => handleToggleComplete(item)}
+                        disabled={updatingItemId === item.id}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                      >
                         <Filter className="h-3.5 w-3.5" />
-                        Mark complete
+                        {updatingItemId === item.id
+                          ? "Updating..."
+                          : item.completed
+                            ? "Mark in progress"
+                            : "Mark complete"}
                       </button>
                     </td>
                   </tr>
