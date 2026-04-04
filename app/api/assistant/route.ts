@@ -4,7 +4,28 @@ import { askAssistant } from "@/lib/assistant";
 
 export async function POST(req: NextRequest) {
   try {
-    const { studentId, message } = await req.json();
+    let payload: unknown;
+
+    try {
+      payload = await req.json();
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid JSON body. Expected { studentId, message }." },
+        { status: 400 }
+      );
+    }
+
+    const body = payload as { studentId?: unknown; message?: unknown };
+    const studentId =
+      typeof body.studentId === "string" ? body.studentId.trim() : "";
+    const message = typeof body.message === "string" ? body.message.trim() : "";
+
+    if (!studentId || !message) {
+      return NextResponse.json(
+        { error: "studentId and message are required." },
+        { status: 400 }
+      );
+    }
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },
