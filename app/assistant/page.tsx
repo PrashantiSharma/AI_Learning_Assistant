@@ -96,7 +96,7 @@ export default function AssistantPage() {
                       {msg.role === "user" ? <UserRound className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />}
                       {msg.role === "user" ? "You" : "LLM Study Assistant"}
                     </p>
-                    <p className="text-sm leading-6">{msg.content}</p>
+                    <p className="text-sm leading-7 whitespace-pre-line">{msg.content}</p>
                   </article>
                 ))}
               </div>
