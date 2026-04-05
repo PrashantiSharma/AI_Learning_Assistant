@@ -14,15 +14,25 @@ async function main() {
     },
   });
 
-  const subject = await prisma.subject.create({
-    data: {
-      name: "Mathematics",
+  const existingSubject = await prisma.subject.findFirst({
+    where: {
       studentId: student.id,
-      syllabus: "Differentiation, Integration, Probability, Matrices and Trigonometry",
-      examPattern: "MCQs, short answers, and problem solving questions",
-      examDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      name: { equals: "Mathematics", mode: "insensitive" },
     },
   });
+
+  const subject =
+    existingSubject ??
+    (await prisma.subject.create({
+      data: {
+        name: "Mathematics",
+        studentId: student.id,
+        syllabus:
+          "Differentiation, Integration, Probability, Matrices and Trigonometry",
+        examPattern: "MCQs, short answers, and problem solving questions",
+        examDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      },
+    }));
 
   const topics = [
     {
@@ -68,12 +78,21 @@ async function main() {
   ];
 
   for (const topic of topics) {
-    await prisma.topic.create({
-      data: {
-        ...topic,
+    const existingTopic = await prisma.topic.findFirst({
+      where: {
         subjectId: subject.id,
+        name: { equals: topic.name, mode: "insensitive" },
       },
     });
+
+    if (!existingTopic) {
+      await prisma.topic.create({
+        data: {
+          ...topic,
+          subjectId: subject.id,
+        },
+      });
+    }
   }
 
   await prisma.studyLog.create({
