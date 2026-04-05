@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { predictStudyPlan } from "@/lib/ml-client";
+import { WORKFLOW_DRAFT_TITLE_PREFIX } from "@/lib/study-plan-workflow";
+import {
+  UploadParseError,
+  extractUploadedFileText,
+} from "@/lib/upload-text-extractor";
 
 type JsonObject = Record<string, unknown>;
 
@@ -153,19 +158,47 @@ function serializePlanRecord(plan: {
   };
 }
 
-async function resolveSubject(studentId: string, subjectId?: string) {
+async function resolveSubjects(studentId: string, subjectId?: string) {
   if (subjectId) {
-    return prisma.subject.findFirst({
+    const subject = await prisma.subject.findFirst({
       where: { id: subjectId, studentId },
-      include: { topics: true, student: true },
+      include: { topics: true },
     });
+    return subject ? [subject] : [];
   }
 
-  return prisma.subject.findFirst({
+  const subjects = await prisma.subject.findMany({
     where: { studentId },
-    include: { topics: true, student: true },
+    include: { topics: true },
     orderBy: { createdAt: "asc" },
   });
+
+  const mergedByName = new Map<
+    string,
+    (typeof subjects)[number] & { topics: (typeof subjects)[number]["topics"] }
+  >();
+
+  for (const subject of subjects) {
+    const key = subject.name.trim().toLowerCase();
+    const current = mergedByName.get(key);
+    if (!current) {
+      mergedByName.set(key, { ...subject, topics: [...subject.topics] });
+      continue;
+    }
+
+    const existingTopicNames = new Set(
+      current.topics.map((topic) => topic.name.trim().toLowerCase())
+    );
+    for (const topic of subject.topics) {
+      const topicKey = topic.name.trim().toLowerCase();
+      if (!existingTopicNames.has(topicKey)) {
+        current.topics.push(topic);
+        existingTopicNames.add(topicKey);
+      }
+    }
+  }
+
+  return [...mergedByName.values()];
 }
 
 async function createAndStorePlan(input: {
@@ -173,39 +206,42 @@ async function createAndStorePlan(input: {
   subjectId?: string;
   previousPlanItems?: StoredPlanItem[];
 }) {
-  const subject = await resolveSubject(input.studentId, input.subjectId);
-  if (!subject) {
+  const subjects = await resolveSubjects(input.studentId, input.subjectId);
+  if (subjects.length === 0) {
     return {
       error: "Subject not found for student",
       status: 404 as const,
     };
   }
 
-  if (subject.topics.length === 0) {
+  const subjectsWithTopics = subjects.filter((subject) => subject.topics.length > 0);
+  if (subjectsWithTopics.length === 0) {
     return {
-      error: "No topics found for this subject. Add topics first.",
+      error: "No topics found for selected subjects. Add topics first.",
       status: 400 as const,
     };
   }
 
-  const rows = subject.topics.map((topic) => ({
-    student_id: input.studentId,
-    subject: subject.name,
-    topic_name: topic.name,
-    topic_difficulty: topic.difficulty ?? 3,
-    exam_date: subject.examDate?.toISOString() ?? new Date().toISOString(),
-    current_date: new Date().toISOString(),
-    study_time_minutes: 60,
-    quiz_accuracy: topic.quizAccuracy ?? 50,
-    practice_attempts: topic.practiceAttempts ?? 0,
-    revision_count: topic.revisionCount ?? 0,
-    last_studied_days_ago: topic.lastStudiedDays ?? 7,
-    completion_ratio: topic.completionRatio ?? 0,
-    previous_score: topic.previousScore ?? 50,
-    syllabus_text: subject.syllabus ?? "",
-    exam_pattern_text: subject.examPattern ?? "",
-    material_text: `${topic.name} practice notes and examples`,
-  }));
+  const rows = subjectsWithTopics.flatMap((subject) =>
+    subject.topics.map((topic) => ({
+      student_id: input.studentId,
+      subject: subject.name,
+      topic_name: topic.name,
+      topic_difficulty: topic.difficulty ?? 3,
+      exam_date: subject.examDate?.toISOString() ?? new Date().toISOString(),
+      current_date: new Date().toISOString(),
+      study_time_minutes: 60,
+      quiz_accuracy: topic.quizAccuracy ?? 50,
+      practice_attempts: topic.practiceAttempts ?? 0,
+      revision_count: topic.revisionCount ?? 0,
+      last_studied_days_ago: topic.lastStudiedDays ?? 7,
+      completion_ratio: topic.completionRatio ?? 0,
+      previous_score: topic.previousScore ?? 50,
+      syllabus_text: subject.syllabus ?? "",
+      exam_pattern_text: subject.examPattern ?? "",
+      material_text: `${topic.name} practice notes and examples`,
+    }))
+  );
 
   const prediction = await predictStudyPlan(rows);
   const normalized = normalizeStoredPayload(prediction);
@@ -226,15 +262,20 @@ async function createAndStorePlan(input: {
     predictions: normalized.predictions,
     study_plan: mergedStudyPlan,
     meta: {
-      subjectId: subject.id,
+      subjectIds: subjectsWithTopics.map((subject) => subject.id),
       generatedAt: new Date().toISOString(),
     },
   };
 
+  const planTitle =
+    subjectsWithTopics.length === 1
+      ? `${subjectsWithTopics[0].name} Personalized Study Plan`
+      : `Multi-subject Personalized Study Plan (${subjectsWithTopics.length} subjects)`;
+
   const created = await prisma.studyPlan.create({
     data: {
       studentId: input.studentId,
-      title: `${subject.name} Personalized Study Plan`,
+      title: planTitle,
       planDate: new Date(),
       contentJson: contentJson as Prisma.InputJsonValue,
     },
@@ -268,7 +309,12 @@ export async function GET(req: NextRequest) {
     }
 
     const latest = await prisma.studyPlan.findFirst({
-      where: { studentId },
+      where: {
+        studentId,
+        NOT: {
+          title: { startsWith: `${WORKFLOW_DRAFT_TITLE_PREFIX}:` },
+        },
+      },
       orderBy: [{ planDate: "desc" }, { createdAt: "desc" }],
     });
 
@@ -303,6 +349,20 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const contentType = req.headers.get("content-type")?.toLowerCase() ?? "";
+    const isMultipart = contentType.includes("multipart/form-data");
+    const mode = new URL(req.url).searchParams.get("mode");
+
+    if (isMultipart || mode === "upload") {
+      const formData = await req.formData();
+      const file = formData.get("file");
+      if (!(file instanceof File)) {
+        return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+      }
+      const result = await extractUploadedFileText(file);
+      return NextResponse.json(result);
+    }
+
     const payload = (await req.json()) as {
       studentId?: string;
       subjectId?: string;
@@ -319,7 +379,12 @@ export async function POST(req: NextRequest) {
     }
 
     const latest = await prisma.studyPlan.findFirst({
-      where: { studentId },
+      where: {
+        studentId,
+        NOT: {
+          title: { startsWith: `${WORKFLOW_DRAFT_TITLE_PREFIX}:` },
+        },
+      },
       orderBy: [{ planDate: "desc" }, { createdAt: "desc" }],
     });
 
@@ -343,6 +408,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(generated.data);
   } catch (error) {
     console.error(error);
+    if (error instanceof UploadParseError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json(
       { error: "Failed to generate study plan" },
       { status: 500 }
@@ -370,7 +438,12 @@ export async function PATCH(req: NextRequest) {
     }
 
     const latest = await prisma.studyPlan.findFirst({
-      where: { studentId },
+      where: {
+        studentId,
+        NOT: {
+          title: { startsWith: `${WORKFLOW_DRAFT_TITLE_PREFIX}:` },
+        },
+      },
       orderBy: [{ planDate: "desc" }, { createdAt: "desc" }],
     });
 
@@ -392,6 +465,22 @@ export async function PATCH(req: NextRequest) {
       ...normalized.studyPlan[itemIndex],
       completed,
     };
+    const updatedItem = normalized.studyPlan[itemIndex];
+    const matchingTopicItems = normalized.studyPlan.filter(
+      (item) =>
+        item.subject === updatedItem.subject &&
+        item.topic_name === updatedItem.topic_name
+    );
+    const topicCompletionRatio =
+      matchingTopicItems.length > 0
+        ? matchingTopicItems.filter((item) => item.completed).length /
+          matchingTopicItems.length
+        : 0;
+    const planMeta = asObject(normalized.raw.meta);
+    const subjectIdFromMeta =
+      typeof planMeta.subjectId === "string" && planMeta.subjectId.trim()
+        ? planMeta.subjectId
+        : undefined;
 
     const nextContent = {
       ...normalized.raw,
@@ -403,16 +492,42 @@ export async function PATCH(req: NextRequest) {
       },
     };
 
-    const updated = await prisma.studyPlan.update({
-      where: { id: latest.id },
-      data: {
-        contentJson: nextContent as Prisma.InputJsonValue,
-      },
+    const updated = await prisma.$transaction(async (tx) => {
+      const updatedPlan = await tx.studyPlan.update({
+        where: { id: latest.id },
+        data: {
+          contentJson: nextContent as Prisma.InputJsonValue,
+        },
+      });
+
+      const matchedSubjectId =
+        subjectIdFromMeta ??
+        (
+          await tx.subject.findFirst({
+            where: { studentId, name: updatedItem.subject },
+            select: { id: true },
+          })
+        )?.id;
+
+      if (matchedSubjectId) {
+        await tx.topic.updateMany({
+          where: {
+            subjectId: matchedSubjectId,
+            name: updatedItem.topic_name,
+          },
+          data: {
+            completionRatio: topicCompletionRatio,
+          },
+        });
+      }
+
+      return updatedPlan;
     });
 
     return NextResponse.json({
       planId: updated.id,
       study_plan: normalized.studyPlan,
+      topic_completion_ratio: topicCompletionRatio,
     });
   } catch (error) {
     console.error(error);
