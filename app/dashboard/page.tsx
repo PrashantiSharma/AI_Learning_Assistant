@@ -31,7 +31,7 @@ export default async function DashboardPage() {
   const completionRatio =
     topics.length > 0
       ? Math.round(
-          topics.reduce((acc, topic) => acc + Number(topic.completionRatio ?? 0), 0) / topics.length,
+          (topics.reduce((acc, topic) => acc + Number(topic.completionRatio ?? 0), 0) / topics.length) * 100,
         )
       : 0;
 
