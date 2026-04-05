@@ -1,10 +1,13 @@
 import { prisma } from "@/lib/prisma";
+import { requireAuthenticatedStudentForPage } from "@/lib/auth";
 import { SectionHeader } from "@/components/ui/section-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { Activity, CalendarCheck2, ChartNoAxesColumn, RefreshCcw } from "lucide-react";
 
 export default async function AnalyticsPage() {
-  const student = await prisma.student.findFirst({
+  const authStudent = await requireAuthenticatedStudentForPage();
+  const student = await prisma.student.findUnique({
+    where: { id: authStudent.id },
     include: { subjects: { include: { topics: true } }, studyLogs: true },
   });
 

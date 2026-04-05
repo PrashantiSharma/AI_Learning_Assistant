@@ -1,34 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { askAssistant } from "@/lib/assistant";
+import { AuthError, requireAuthenticatedStudentFromRequest } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
   try {
+    const authStudent = await requireAuthenticatedStudentFromRequest(req);
     let payload: unknown;
 
     try {
       payload = await req.json();
     } catch {
       return NextResponse.json(
-        { error: "Invalid JSON body. Expected { studentId, message }." },
+        { error: "Invalid JSON body. Expected { message }." },
         { status: 400 }
       );
     }
 
-    const body = payload as { studentId?: unknown; message?: unknown };
-    const studentId =
-      typeof body.studentId === "string" ? body.studentId.trim() : "";
+    const body = payload as { message?: unknown };
     const message = typeof body.message === "string" ? body.message.trim() : "";
 
-    if (!studentId || !message) {
+    if (!message) {
       return NextResponse.json(
-        { error: "studentId and message are required." },
+        { error: "message is required." },
         { status: 400 }
       );
     }
 
     const student = await prisma.student.findUnique({
-      where: { id: studentId },
+      where: { id: authStudent.id },
       include: {
         subjects: {
           include: { topics: true },
@@ -51,13 +51,16 @@ export async function POST(req: NextRequest) {
 
     await prisma.assistantMessage.createMany({
       data: [
-        { studentId, role: "user", content: message },
-        { studentId, role: "assistant", content: reply },
+        { studentId: authStudent.id, role: "user", content: message },
+        { studentId: authStudent.id, role: "assistant", content: reply },
       ],
     });
 
     return NextResponse.json({ reply });
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error(error);
     return NextResponse.json({ error: "Assistant failed" }, { status: 500 });
   }
