@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { AuthError, requireAuthenticatedStudentFromRequest } from "@/lib/auth";
 import {
   UploadParseError,
   extractUploadedFileText,
@@ -8,6 +9,7 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
+    await requireAuthenticatedStudentFromRequest(req);
     const formData = await req.formData();
     const file = formData.get("file");
 
@@ -19,6 +21,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result);
   } catch (error) {
     console.error(error);
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof UploadParseError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

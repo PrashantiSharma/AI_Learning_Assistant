@@ -30,13 +30,17 @@ export default function AssistantPage() {
 
     try {
       const seedRes = await fetch("/api/seed-info");
+      if (seedRes.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
       const seedInfo = await seedRes.json();
       if (!seedRes.ok) throw new Error(seedInfo.error ?? "Could not load student context");
 
       const res = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studentId: seedInfo.studentId, message: input }),
+        body: JSON.stringify({ message: input }),
       });
       const data = await res.json();
 
