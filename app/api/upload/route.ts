@@ -1,15 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  UploadParseError,
+  extractUploadedFileText,
+} from "@/lib/upload-text-extractor";
+
+export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
-  const formData = await req.formData();
-  const file = formData.get("file");
+  try {
+    const formData = await req.formData();
+    const file = formData.get("file");
 
-  if (!file) {
-    return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+    }
+
+    const result = await extractUploadedFileText(file);
+    return NextResponse.json(result);
+  } catch (error) {
+    console.error(error);
+    if (error instanceof UploadParseError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? `Failed to process uploaded file: ${error.message}`
+            : "Failed to process uploaded file",
+      },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json({
-    message: "File received. Plug PDF extraction or object storage here in production.",
-    filename: typeof file === "object" && "name" in file ? file.name : "unknown",
-  });
 }
