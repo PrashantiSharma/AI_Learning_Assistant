@@ -6,12 +6,15 @@ export async function GET() {
     include: { subjects: true },
   });
 
-  if (!student || student.subjects.length === 0) {
+  if (!student) {
     return NextResponse.json({ error: "Seed data not found" }, { status: 404 });
   }
 
   return NextResponse.json({
     studentId: student.id,
-    subjectId: student.subjects[0].id,
+    subjects: student.subjects.map((subject) => ({
+      id: subject.id,
+      name: subject.name,
+    })),
   });
 }
