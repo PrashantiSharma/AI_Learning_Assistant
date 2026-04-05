@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { predictStudyPlan } from "@/lib/ml-client";
 import { WORKFLOW_DRAFT_TITLE_PREFIX } from "@/lib/study-plan-workflow";
+import { AuthError, requireAuthenticatedStudentFromRequest } from "@/lib/auth";
 import {
   UploadParseError,
   extractUploadedFileText,
@@ -294,19 +295,13 @@ async function createAndStorePlan(input: {
 
 export async function GET(req: NextRequest) {
   try {
+    const authStudent = await requireAuthenticatedStudentFromRequest(req);
     const { searchParams } = new URL(req.url);
-    const studentId = searchParams.get("studentId")?.trim() ?? "";
+    const studentId = authStudent.id;
     const subjectId = searchParams.get("subjectId")?.trim() ?? undefined;
     const autoGenerate =
       searchParams.get("autoGenerate") === "true" ||
       searchParams.get("autoGenerate") === "1";
-
-    if (!studentId) {
-      return NextResponse.json(
-        { error: "studentId query param is required" },
-        { status: 400 }
-      );
-    }
 
     const latest = await prisma.studyPlan.findFirst({
       where: {
@@ -339,6 +334,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(generated.data);
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error(error);
     return NextResponse.json(
       { error: "Failed to load study plan" },
@@ -349,6 +347,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const authStudent = await requireAuthenticatedStudentFromRequest(req);
     const contentType = req.headers.get("content-type")?.toLowerCase() ?? "";
     const isMultipart = contentType.includes("multipart/form-data");
     const mode = new URL(req.url).searchParams.get("mode");
@@ -363,20 +362,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(result);
     }
 
-    const payload = (await req.json()) as {
-      studentId?: string;
-      subjectId?: string;
-    };
-
-    const studentId = payload.studentId?.trim() ?? "";
+    const payload = (await req.json()) as { subjectId?: string };
+    const studentId = authStudent.id;
     const subjectId = payload.subjectId?.trim() || undefined;
-
-    if (!studentId) {
-      return NextResponse.json(
-        { error: "studentId is required" },
-        { status: 400 }
-      );
-    }
 
     const latest = await prisma.studyPlan.findFirst({
       where: {
@@ -408,6 +396,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(generated.data);
   } catch (error) {
     console.error(error);
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof UploadParseError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
@@ -420,19 +411,19 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
+    const authStudent = await requireAuthenticatedStudentFromRequest(req);
     const payload = (await req.json()) as {
-      studentId?: string;
       itemId?: string;
       completed?: boolean;
     };
 
-    const studentId = payload.studentId?.trim() ?? "";
+    const studentId = authStudent.id;
     const itemId = payload.itemId?.trim() ?? "";
     const completed = Boolean(payload.completed);
 
-    if (!studentId || !itemId) {
+    if (!itemId) {
       return NextResponse.json(
-        { error: "studentId and itemId are required" },
+        { error: "itemId is required" },
         { status: 400 }
       );
     }
@@ -530,6 +521,9 @@ export async function PATCH(req: NextRequest) {
       topic_completion_ratio: topicCompletionRatio,
     });
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error(error);
     return NextResponse.json(
       { error: "Failed to update study plan item" },

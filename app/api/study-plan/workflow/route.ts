@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { predictStudyPlan } from "@/lib/ml-client";
+import { AuthError, requireAuthenticatedStudentFromRequest } from "@/lib/auth";
 import {
   UploadParseError,
   extractUploadedFileText,
@@ -248,6 +249,7 @@ function parseDraftContent(contentJson: unknown) {
 
 export async function POST(req: NextRequest) {
   try {
+    const authStudent = await requireAuthenticatedStudentFromRequest(req);
     const contentType = req.headers.get("content-type")?.toLowerCase() ?? "";
     const isMultipart = contentType.includes("multipart/form-data");
     const mode = new URL(req.url).searchParams.get("mode");
@@ -263,7 +265,6 @@ export async function POST(req: NextRequest) {
     }
 
     const payload = (await req.json()) as {
-      studentId?: string;
       examDate?: string;
       examName?: string;
       targetScorePercent?: number;
@@ -271,7 +272,7 @@ export async function POST(req: NextRequest) {
       questionPaperText?: string;
     };
 
-    const studentId = payload.studentId?.trim() ?? "";
+    const studentId = authStudent.id;
     const examDate = payload.examDate?.trim() ?? "";
     const examName = toSafeLabel(payload.examName, "General Exam");
     const targetScorePercent = normalizeTargetScorePercent(
@@ -284,9 +285,9 @@ export async function POST(req: NextRequest) {
     const syllabusText = syllabusPrepared.text;
     const questionPaperText = questionPaperPrepared.text;
 
-    if (!studentId || !examDate) {
+    if (!examDate) {
       return NextResponse.json(
-        { error: "studentId and examDate are required" },
+        { error: "examDate is required" },
         { status: 400 }
       );
     }
@@ -384,6 +385,9 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error(error);
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof UploadParseError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
@@ -399,18 +403,18 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
+    const authStudent = await requireAuthenticatedStudentFromRequest(req);
     const payload = (await req.json()) as {
-      studentId?: string;
       sessionId?: string;
       topicInputs?: unknown;
     };
 
-    const studentId = payload.studentId?.trim() ?? "";
+    const studentId = authStudent.id;
     const sessionId = payload.sessionId?.trim() ?? "";
 
-    if (!studentId || !sessionId) {
+    if (!sessionId) {
       return NextResponse.json(
-        { error: "studentId and sessionId are required" },
+        { error: "sessionId is required" },
         { status: 400 }
       );
     }
@@ -457,6 +461,9 @@ export async function PATCH(req: NextRequest) {
     });
   } catch (error) {
     console.error(error);
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json(
       { error: "Failed to save workflow topic calibration" },
       { status: 500 }
@@ -466,18 +473,18 @@ export async function PATCH(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
+    const authStudent = await requireAuthenticatedStudentFromRequest(req);
     const payload = (await req.json()) as {
-      studentId?: string;
       sessionId?: string;
       topicInputs?: unknown;
     };
 
-    const studentId = payload.studentId?.trim() ?? "";
+    const studentId = authStudent.id;
     const sessionId = payload.sessionId?.trim() ?? "";
 
-    if (!studentId || !sessionId) {
+    if (!sessionId) {
       return NextResponse.json(
-        { error: "studentId and sessionId are required" },
+        { error: "sessionId is required" },
         { status: 400 }
       );
     }
@@ -762,6 +769,9 @@ export async function PUT(req: NextRequest) {
     });
   } catch (error) {
     console.error(error);
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json(
       { error: "Failed to finalize workflow and generate study plan" },
       { status: 500 }
