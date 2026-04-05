@@ -4,3 +4,5 @@ node_modules
 .env.local
 .env.*.local
 ml-service/__pycache__/
+.next-dev
+.next-build
