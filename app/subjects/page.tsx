@@ -35,7 +35,14 @@ export default function SubjectManagementPage() {
     setLoading(true);
     setError(null);
     try {
-      const [subjectsRes, topicsRes] = await Promise.all([fetch("/api/subjects"), fetch("/api/topics")]);
+      const seedRes = await fetch("/api/seed-info");
+      const seedInfo = await seedRes.json();
+      if (!seedRes.ok) throw new Error(seedInfo.error ?? "Student not found");
+
+      const [subjectsRes, topicsRes] = await Promise.all([
+        fetch(`/api/subjects?studentId=${encodeURIComponent(seedInfo.studentId)}`),
+        fetch(`/api/topics?studentId=${encodeURIComponent(seedInfo.studentId)}`),
+      ]);
       const subjectsData = await subjectsRes.json();
       const topicsData = await topicsRes.json();
 
@@ -43,10 +50,22 @@ export default function SubjectManagementPage() {
         throw new Error(subjectsData.error ?? topicsData.error ?? "Failed loading subjects/topics");
       }
 
-      setSubjects(subjectsData);
+      const uniqueSubjects = (Array.isArray(subjectsData) ? subjectsData : []).filter(
+        (subject: Subject, index: number, arr: Subject[]) =>
+          arr.findIndex(
+            (entry) => entry.name.trim().toLowerCase() === subject.name.trim().toLowerCase()
+          ) === index
+      );
+
+      setSubjects(uniqueSubjects);
       setTopics(topicsData);
-      if (!selectedSubjectId && subjectsData[0]?.id) {
-        setSelectedSubjectId(subjectsData[0].id);
+      if (!selectedSubjectId && uniqueSubjects[0]?.id) {
+        setSelectedSubjectId(uniqueSubjects[0].id);
+      } else if (
+        selectedSubjectId &&
+        !uniqueSubjects.some((subject: Subject) => subject.id === selectedSubjectId)
+      ) {
+        setSelectedSubjectId(uniqueSubjects[0]?.id ?? "");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed loading subject data.");
