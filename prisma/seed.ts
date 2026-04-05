@@ -1,15 +1,20 @@
 import "../lib/env";
 import { PrismaClient } from "@prisma/client";
+import { hashPassword } from "../lib/auth-crypto";
 
 const prisma = new PrismaClient();
 
 async function main() {
+  const demoPasswordHash = hashPassword("demo12345");
   const student = await prisma.student.upsert({
     where: { email: "demo@student.com" },
-    update: {},
+    update: {
+      passwordHash: demoPasswordHash,
+    },
     create: {
       name: "Demo Student",
       email: "demo@student.com",
+      passwordHash: demoPasswordHash,
       dailyStudyHours: 4,
     },
   });
@@ -104,6 +109,7 @@ async function main() {
   });
 
   console.log("Seed completed");
+  console.log("Demo login -> email: demo@student.com password: demo12345");
 }
 
 main()

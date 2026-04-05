@@ -9,11 +9,14 @@ import {
   Sparkles,
 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
+import { requireAuthenticatedStudentForPage } from "@/lib/auth";
 import { StatCard } from "@/components/ui/stat-card";
 import { SectionHeader } from "@/components/ui/section-header";
 
 export default async function DashboardPage() {
-  const student = await prisma.student.findFirst({
+  const authStudent = await requireAuthenticatedStudentForPage();
+  const student = await prisma.student.findUnique({
+    where: { id: authStudent.id },
     include: {
       subjects: { include: { topics: true } },
       studyPlans: true,

@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import {
   BarChart3,
   BotMessageSquare,
   BookOpen,
   GraduationCap,
   LayoutDashboard,
+  LogOut,
   NotebookText,
 } from "lucide-react";
 
@@ -16,11 +18,44 @@ const links = [
   { href: "/study-plan", label: "Study Plan", icon: NotebookText },
   { href: "/assistant", label: "LLM API", icon: BotMessageSquare },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/subjects", label: "Subjects", icon: BookOpen },
+  { href: "/subjects", label: "Exams", icon: BookOpen },
 ];
 
 export function AppNavigation() {
   const pathname = usePathname();
+  const router = useRouter();
+  const [studentName, setStudentName] = useState<string | null>(null);
+  const isAuthPage = pathname === "/login" || pathname === "/register";
+
+  useEffect(() => {
+    if (isAuthPage) return;
+    let cancelled = false;
+
+    async function loadSession() {
+      try {
+        const response = await fetch("/api/auth/me", { cache: "no-store" });
+        const data = await response.json();
+        if (!cancelled && response.ok) {
+          setStudentName(String(data.student?.name ?? ""));
+        }
+      } catch {
+        if (!cancelled) setStudentName(null);
+      }
+    }
+
+    void loadSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthPage]);
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    router.push("/login");
+    router.refresh();
+  }
+
+  if (isAuthPage) return null;
 
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/90 backdrop-blur">
@@ -52,6 +87,20 @@ export function AppNavigation() {
               </Link>
             );
           })}
+          {studentName ? (
+            <>
+              <span className="ml-1 rounded-xl bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700">
+                {studentName}
+              </span>
+              <button
+                onClick={handleLogout}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
+              >
+                <LogOut className="h-4 w-4" />
+                Logout
+              </button>
+            </>
+          ) : null}
         </nav>
       </div>
     </header>

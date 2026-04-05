@@ -196,6 +196,10 @@ export default function StudyPlanPage() {
     if (seedInfo) return seedInfo;
 
     const res = await fetch("/api/seed-info");
+    if (res.status === 401) {
+      window.location.href = "/login";
+      throw new Error("Authentication required");
+    }
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Failed to load student context");
 
